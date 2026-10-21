@@ -1,0 +1,6 @@
+{
+  "appId": "com.khira.qibla",
+  "appName": "Qibla - Khira",
+  "webDir": "www",
+  "bundledWebRuntime": false
+}
