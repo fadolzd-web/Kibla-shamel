@@ -1,4 +1,4 @@
-name: build-qibla-apk-aab
+name: build-qibla
 on: [push, workflow_dispatch]
 jobs:
   build:
@@ -10,12 +10,6 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
 
-      - name: Find kibla.png 75KB
-        run: |
-          ICON=$(ls kibla.png khira.png icon.png 2>/dev/null | head -1)
-          echo "ICON_FILE=$ICON" >> $GITHUB_ENV
-          echo "Using $ICON - size $(du -h $ICON)"
-
       - run: npm install
       - run: |
           mkdir -p www
@@ -23,64 +17,64 @@ jobs:
       - run: npx cap add android || true
       - run: npx cap sync android
 
-      - name: FIX - Resize 75KB icon to correct mipmap sizes
+      - name: FIX 1 - صغّر kibla.png + FIX 2 - فعّل سنسر البوصلة
         run: |
           pip install Pillow
           rm -rf android/app/src/main/res/mipmap-anydpi-v26
           rm -f android/app/src/main/res/mipmap-*/ic_launcher.xml
           rm -f android/app/src/main/res/mipmap-*/ic_launcher_round.xml
           
-          python3 << 'PY'
+          # صغّر الأيقونة 75KB
+          ICON=$(ls kibla.png khira.png icon.png 2>/dev/null | head -1)
+          python3 << PY
           from PIL import Image
           import os
-          icon = os.environ['ICON_FILE']
-          print(f"Original: {icon}")
-          im = Image.open(icon).convert("RGBA")
-          print(f"Original size: {im.size}")
-          
-          sizes = {
-              "mipmap-mdpi": 48,
-              "mipmap-hdpi": 72,
-              "mipmap-xhdpi": 96,
-              "mipmap-xxhdpi": 144,
-              "mipmap-xxxhdpi": 192,
-          }
-          for folder, size in sizes.items():
-              path = f"android/app/src/main/res/{folder}"
-              os.makedirs(path, exist_ok=True)
-              r = im.resize((size, size), Image.LANCZOS)
-              r.save(f"{path}/ic_launcher.png", "PNG", optimize=True)
-              r.save(f"{path}/ic_launcher_round.png", "PNG", optimize=True)
-              print(f"{folder} -> {size}x{size} OK")
+          im = Image.open(os.environ.get('ICON','kibla.png')).convert("RGBA")
+          for folder,size in [("mipmap-mdpi",48),("mipmap-hdpi",72),("mipmap-xhdpi",96),("mipmap-xxhdpi",144),("mipmap-xxxhdpi",192)]:
+              p=f"android/app/src/main/res/{folder}"
+              os.makedirs(p,exist_ok=True)
+              r=im.resize((size,size), Image.LANCZOS)
+              r.save(f"{p}/ic_launcher.png","PNG",optimize=True)
+              r.save(f"{p}/ic_launcher_round.png","PNG",optimize=True)
           PY
-
-      - name: Permissions Qibla + Keystore Fadel03906563
-        run: |
+          
+          # ركّب كود السنسور اللي بيخلي البوصلة تدور
+          mkdir -p android/app/src/main/java/com/khira/qibla
+          cat > android/app/src/main/java/com/khira/qibla/MainActivity.java << 'JAVA'
+          package com.khira.qibla;
+          import android.content.Context;import android.hardware.Sensor;import android.hardware.SensorEvent;import android.hardware.SensorEventListener;import android.hardware.SensorManager;import android.os.Bundle;import com.getcapacitor.BridgeActivity;
+          public class MainActivity extends BridgeActivity implements SensorEventListener {
+              private SensorManager sm;private Sensor s;private float[] rm=new float[9];private float[] o=new float[3];private long last=0;
+              @Override public void onCreate(Bundle b){super.onCreate(b);sm=(SensorManager)getSystemService(Context.SENSOR_SERVICE);s=sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);}
+              @Override protected void onResume(){super.onResume();if(s!=null) sm.registerListener(this,s,SensorManager.SENSOR_DELAY_GAME);}
+              @Override protected void onPause(){super.onPause();sm.unregisterListener(this);}
+              @Override public void onSensorChanged(SensorEvent e){if(e.sensor.getType()!=Sensor.TYPE_ROTATION_VECTOR) return;long now=System.currentTimeMillis();if(now-last<50) return;last=now;SensorManager.getRotationMatrixFromVector(rm,e.values);SensorManager.getOrientation(rm,o);float az=(float)Math.toDegrees(o[0]);az=(az+360)%360;final float a=az;runOnUiThread(()->{if(bridge!=null&&bridge.getWebView()!=null){String js="javascript:try{window.__smoothAz="+a+";if(window.onNativeAzimuth)window.onNativeAzimuth("+a+");window.postMessage({type:'native-azimuth',az:"+a+"},'*');}catch(e){}";bridge.getWebView().evaluateJavascript(js,null);}});}
+              @Override public void onAccuracyChanged(Sensor sens,int acc){}
+          }
+          JAVA
+          
+          # أذونات القبلة
           python3 << 'PY'
           import pathlib
-          mf=pathlib.Path("android/app/src/main/AndroidManifest.xml")
-          txt=mf.read_text()
-          if "ACCESS_FINE_LOCATION" not in txt:
-              perms="""
-                  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-                  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-                  <uses-permission android:name="android.permission.INTERNET" />
-                  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-                  <uses-feature android:name="android.hardware.sensor.compass" android:required="true" />
-              """
-              txt=txt.replace("<application", perms+"\n    <application")
-              mf.write_text(txt)
+          p=pathlib.Path("android/app/src/main/AndroidManifest.xml")
+          t=p.read_text()
+          if "ACCESS_FINE_LOCATION" not in t:
+              t=t.replace("<application",'<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n<uses-permission android:name="android.permission.INTERNET" />\n<uses-feature android:name="android.hardware.sensor.compass" android:required="true" />\n    <application')
+              p.write_text(t)
           PY
+
+      - name: Keystore Fadel03906563
+        run: |
           python3 << 'PY'
           import pathlib
           p=pathlib.Path("android/app/build.gradle")
           s=p.read_text()
           if "keystoreProperties" not in s:
-              s=s.replace("android {", "def keystoreProperties = new Properties()\ndef keystorePropertiesFile = rootProject.file('app/key.properties')\nif (keystorePropertiesFile.exists()) { keystoreProperties.load(new FileInputStream(keystorePropertiesFile)) }\n\nandroid {")
+              s=s.replace("android {","def keystoreProperties = new Properties()\ndef keystorePropertiesFile = rootProject.file('app/key.properties')\nif (keystorePropertiesFile.exists()) { keystoreProperties.load(new FileInputStream(keystorePropertiesFile)) }\n\nandroid {")
           if "signingConfigs" not in s:
-              s=s.replace("buildTypes {", "signingConfigs { release { if (keystorePropertiesFile.exists()) { storeFile file(keystoreProperties['storeFile']); storePassword keystoreProperties['storePassword']; keyAlias keystoreProperties['keyAlias']; keyPassword keystoreProperties['keyPassword'] } } }\n    buildTypes {")
+              s=s.replace("buildTypes {","signingConfigs { release { if (keystorePropertiesFile.exists()) { storeFile file(keystoreProperties['storeFile']); storePassword keystoreProperties['storePassword']; keyAlias keystoreProperties['keyAlias']; keyPassword keystoreProperties['keyPassword'] } } }\n    buildTypes {")
           if "signingConfig signingConfigs.release" not in s:
-              s=s.replace("buildTypes {\n        release {", "buildTypes {\n        release {\n            signingConfig signingConfigs.release")
+              s=s.replace("buildTypes {\n        release {","buildTypes {\n        release {\n            signingConfig signingConfigs.release")
           p.write_text(s)
           PY
           keytool -genkeypair -keystore android/app/mykey.jks -storepass Fadel03906563 -keypass Fadel03906563 -alias mykey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Khira Qibla, L=Tripoli, C=LB"
@@ -93,10 +87,11 @@ jobs:
         run: |
           chmod +x android/gradlew
           cd android && ./gradlew clean assembleRelease bundleRelease
+          ls -lh app/build/outputs/apk/release/ app/build/outputs/bundle/release/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Qibla-APK-AAB-75KB-FIXED
+          name: Qibla-FIXED-SENSOR-ICON
           path: |
             android/app/build/outputs/apk/release/*.apk
             android/app/build/outputs/bundle/release/*.aab
