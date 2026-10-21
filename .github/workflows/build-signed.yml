@@ -10,55 +10,67 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
 
-      - name: Find icon kibla.png first!
+      - name: Find kibla.png 75KB
         run: |
           ICON=$(ls kibla.png khira.png icon.png 2>/dev/null | head -1)
           echo "ICON_FILE=$ICON" >> $GITHUB_ENV
-          echo "Using icon: $ICON"
+          echo "Using $ICON - size $(du -h $ICON)"
 
       - run: npm install
-
-      - name: Prepare www
-        run: |
+      - run: |
           mkdir -p www
-          [ -d dist ] && cp -r dist/* www/ || true
           cp index.html www/index.html
-          ls -lh www/
-
       - run: npx cap add android || true
       - run: npx cap sync android
 
-      - name: FIX Duplicate + Inject Qibla Permissions
+      - name: FIX - Resize 75KB icon to correct mipmap sizes
         run: |
-          echo "Fixing duplicate icon..."
+          pip install Pillow
           rm -rf android/app/src/main/res/mipmap-anydpi-v26
           rm -f android/app/src/main/res/mipmap-*/ic_launcher.xml
           rm -f android/app/src/main/res/mipmap-*/ic_launcher_round.xml
-          for d in android/app/src/main/res/mipmap-*; do
-            [ -d "$d" ] && cp "$ICON_FILE" "$d/ic_launcher.png" && cp "$ICON_FILE" "$d/ic_launcher_round.png" && echo "Fixed $d with $ICON_FILE"
-          done
           
-          echo "Injecting Qibla permissions: LOCATION + INTERNET + COMPASS"
+          python3 << 'PY'
+          from PIL import Image
+          import os
+          icon = os.environ['ICON_FILE']
+          print(f"Original: {icon}")
+          im = Image.open(icon).convert("RGBA")
+          print(f"Original size: {im.size}")
+          
+          sizes = {
+              "mipmap-mdpi": 48,
+              "mipmap-hdpi": 72,
+              "mipmap-xhdpi": 96,
+              "mipmap-xxhdpi": 144,
+              "mipmap-xxxhdpi": 192,
+          }
+          for folder, size in sizes.items():
+              path = f"android/app/src/main/res/{folder}"
+              os.makedirs(path, exist_ok=True)
+              r = im.resize((size, size), Image.LANCZOS)
+              r.save(f"{path}/ic_launcher.png", "PNG", optimize=True)
+              r.save(f"{path}/ic_launcher_round.png", "PNG", optimize=True)
+              print(f"{folder} -> {size}x{size} OK")
+          PY
+
+      - name: Permissions Qibla + Keystore Fadel03906563
+        run: |
           python3 << 'PY'
           import pathlib
           mf=pathlib.Path("android/app/src/main/AndroidManifest.xml")
           txt=mf.read_text()
-          perms="""
-              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-              <uses-permission android:name="android.permission.INTERNET" />
-              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-              <uses-feature android:name="android.hardware.sensor.compass" android:required="true" />
-              <uses-feature android:name="android.hardware.location.gps" android:required="false" />
-          """
           if "ACCESS_FINE_LOCATION" not in txt:
+              perms="""
+                  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+                  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+                  <uses-permission android:name="android.permission.INTERNET" />
+                  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+                  <uses-feature android:name="android.hardware.sensor.compass" android:required="true" />
+              """
               txt=txt.replace("<application", perms+"\n    <application")
               mf.write_text(txt)
-              print("Permissions injected: LOCATION + INTERNET + COMPASS")
           PY
-
-      - name: Keystore Fadel03906563 + Signing Release
-        run: |
           python3 << 'PY'
           import pathlib
           p=pathlib.Path("android/app/build.gradle")
@@ -77,15 +89,14 @@ jobs:
           echo "keyAlias=mykey" >> android/app/key.properties
           echo "keyPassword=Fadel03906563" >> android/app/key.properties
 
-      - name: Build APK + AAB Release Signed
+      - name: Build APK + AAB
         run: |
           chmod +x android/gradlew
           cd android && ./gradlew clean assembleRelease bundleRelease
-          ls -lh app/build/outputs/apk/release/ app/build/outputs/bundle/release/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Khira-Qibla-APK-AAB-kibla.png-RELEASE
+          name: Qibla-APK-AAB-75KB-FIXED
           path: |
             android/app/build/outputs/apk/release/*.apk
             android/app/build/outputs/bundle/release/*.aab
