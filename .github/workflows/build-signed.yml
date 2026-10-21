@@ -1,4 +1,4 @@
-name: build-qibla
+name: build-qibla-final
 on: [push, workflow_dispatch]
 jobs:
   build:
@@ -14,48 +14,120 @@ jobs:
       - run: |
           mkdir -p www
           cp index.html www/index.html
-          echo '{"appId":"com.khira.qibla","appName":"بوصلتي","webDir":"www","plugins":{"SplashScreen":{"launchShowDuration":2000,"backgroundColor":"#0a1f14","showSpinner":false}}}' > capacitor.config.json
+          echo '{"appId":"com.khira.qibla","appName":"بوصلتي","webDir":"www","plugins":{"SplashScreen":{"launchShowDuration":1500}}}' > capacitor.config.json
       - run: npx cap add android || true
       - run: npx cap sync android
 
-      - name: FIX Icon BIG + No Small Splash
+      - name: FIX ALL - Icon + Permissions + Sensor + NoZoom
         run: |
           pip install Pillow
           python3 << 'PY'
           from PIL import Image
-          import glob, os
-          icon = (glob.glob("kibla.png") or glob.glob("khira.png") or ["kibla.png"])[0]
-          print(f"Using {icon}")
-          im = Image.open(icon).convert("RGBA")
-          # أيقونة اللانشر - حجم طبيعي
-          for folder,size in [("mipmap-mdpi",48),("mipmap-hdpi",72),("mipmap-xhdpi",96),("mipmap-xxhdpi",144),("mipmap-xxxhdpi",192)]:
-              p=f"android/app/src/main/res/{folder}"; os.makedirs(p,exist_ok=True)
-              r=im.resize((size,size), Image.LANCZOS)
-              r.save(f"{p}/ic_launcher.png","PNG")
-              r.save(f"{p}/ic_launcher_round.png","PNG")
-          # السبلاش - حجم كبير واضح 512
-          os.makedirs("android/app/src/main/res/drawable", exist_ok=True)
-          big = im.resize((512,512), Image.LANCZOS)
-          big.save("android/app/src/main/res/drawable/splash.png","PNG")
-          print("Splash 512x512 BIG created")
+          import os, glob, pathlib, shutil
+          # 1. ICON
+          icon_file = None
+          for name in ["kibla.png", "khira.png", "icon.png"]:
+              if os.path.exists(name):
+                  icon_file = name
+                  break
+          if not icon_file:
+              cands = glob.glob("*.png")
+              icon_file = cands[0] if cands else None
+          print(f"ICON: {icon_file}")
+          if icon_file:
+              im = Image.open(icon_file).convert("RGBA")
+              # حذف الـ XML اللي بيغطي
+              for d in pathlib.Path("android/app/src/main/res").glob("mipmap-anydpi*"):
+                  shutil.rmtree(d, ignore_errors=True)
+              for f in pathlib.Path("android/app/src/main/res").rglob("ic_launcher*.xml"):
+                  f.unlink(missing_ok=True)
+              for folder,size in [("mipmap-mdpi",48),("mipmap-hdpi",72),("mipmap-xhdpi",96),("mipmap-xxhdpi",144),("mipmap-xxxhdpi",192)]:
+                  p=f"android/app/src/main/res/{folder}"; os.makedirs(p,exist_ok=True)
+                  r=im.resize((size,size), Image.LANCZOS)
+                  r.save(f"{p}/ic_launcher.png","PNG")
+                  r.save(f"{p}/ic_launcher_round.png","PNG")
+              # سبلاش كبير
+              os.makedirs("android/app/src/main/res/drawable", exist_ok=True)
+              big=im.resize((512,512), Image.LANCZOS)
+              big.save("android/app/src/main/res/drawable/splash.png","PNG")
+              print("✅ Icon & Splash BIG done")
           PY
           
+          # 2. PERMISSIONS
+          python3 << 'PY'
+          import pathlib
+          p=pathlib.Path("android/app/src/main/AndroidManifest.xml")
+          t=p.read_text()
+          if "ACCESS_FINE_LOCATION" not in t:
+              t=t.replace("<application",'<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-feature android:name="android.hardware.sensor.compass" android:required="false" />\n    <uses-feature android:name="android.hardware.location.gps" android:required="false" />\n    <application')
+              p.write_text(t)
+              print("✅ Permissions added")
+          else:
+              print("Permissions already there")
+          PY
+          
+          # 3. SENSOR MainActivity + No Zoom + Single Toast
           mkdir -p android/app/src/main/java/com/khira/qibla
           cat > android/app/src/main/java/com/khira/qibla/MainActivity.java << 'JAVA'
           package com.khira.qibla;
-          import android.content.Context;import android.hardware.Sensor;import android.hardware.SensorEvent;import android.hardware.SensorEventListener;import android.hardware.SensorManager;import android.os.Bundle;import android.widget.Toast;import com.getcapacitor.BridgeActivity;
+          import android.content.Context;
+          import android.hardware.Sensor;
+          import android.hardware.SensorEvent;
+          import android.hardware.SensorEventListener;
+          import android.hardware.SensorManager;
+          import android.os.Bundle;
+          import android.widget.Toast;
+          import com.getcapacitor.BridgeActivity;
           public class MainActivity extends BridgeActivity implements SensorEventListener {
-           private SensorManager sm;private Sensor s;private float[] rm=new float[9];private float[] o=new float[3];private long last=0,lastBack=0;
-           @Override public void onCreate(Bundle b){super.onCreate(b);sm=(SensorManager)getSystemService(Context.SENSOR_SERVICE);s=sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);}
+           private SensorManager sm;
+           private Sensor s;
+           private float[] rm=new float[9];
+           private float[] o=new float[3];
+           private long last=0,lastBack=0;
+           @Override public void onCreate(Bundle b){
+             super.onCreate(b);
+             sm=(SensorManager)getSystemService(Context.SENSOR_SERVICE);
+             s=sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
+             if(s==null) s=sm.getDefaultSensor(Sensor.TYPE_ORIENTATION);
+           }
            @Override public void onResume(){super.onResume();if(s!=null) sm.registerListener(this,s,SensorManager.SENSOR_DELAY_GAME);}
            @Override public void onPause(){super.onPause();sm.unregisterListener(this);}
-           @Override public void onBackPressed(){long now=System.currentTimeMillis();if(now-lastBack<2000){super.onBackPressed();return;}lastBack=now;Toast.makeText(this,"اضغط مرتين للخروج",Toast.LENGTH_SHORT).show();}
-           @Override public void onSensorChanged(SensorEvent e){if(e.sensor.getType()!=Sensor.TYPE_ROTATION_VECTOR) return;long now=System.currentTimeMillis();if(now-last<50) return;last=now;SensorManager.getRotationMatrixFromVector(rm,e.values);SensorManager.getOrientation(rm,o);float az=(float)Math.toDegrees(o[0]);az=(az+360)%360;final float a=az;runOnUiThread(()->{if(bridge!=null&&bridge.getWebView()!=null){bridge.getWebView().evaluateJavascript("javascript:try{window.__smoothAz="+a+";}catch(e){}",null);}});}
+           @Override public void onBackPressed(){
+             long now=System.currentTimeMillis();
+             if(now-lastBack<2000){
+               lastBack=now;
+               Toast.makeText(this,"اضغط مرتين للخروج",Toast.LENGTH_SHORT).show();
+               return;
+             }
+             super.onBackPressed();
+           }
+           @Override public void onSensorChanged(SensorEvent e){
+             if(e.sensor.getType()!=Sensor.TYPE_ROTATION_VECTOR && e.sensor.getType()!=Sensor.TYPE_ORIENTATION) return;
+             long now=System.currentTimeMillis();
+             if(now-last<50) return;
+             last=now;
+             float az=0;
+             if(e.sensor.getType()==Sensor.TYPE_ROTATION_VECTOR){
+               SensorManager.getRotationMatrixFromVector(rm,e.values);
+               SensorManager.getOrientation(rm,o);
+               az=(float)Math.toDegrees(o[0]);
+             } else {
+               az=e.values[0];
+             }
+             az=(az+360)%360;
+             final float a=az;
+             runOnUiThread(()->{
+               if(bridge!=null&&bridge.getWebView()!=null){
+                 bridge.getWebView().evaluateJavascript("javascript:try{window.__smoothAz="+a+";if(window.updateQibla) window.updateQibla();}catch(e){}",null);
+               }
+             });
+           }
            @Override public void onAccuracyChanged(Sensor sens,int acc){}
           }
           JAVA
+          echo "✅ Sensor + Permissions + NoZoom Java done"
 
-      - name: Keystore Fadel03906563
+      - name: Keystore
         run: |
           python3 << 'PY'
           import pathlib
@@ -75,14 +147,12 @@ jobs:
           echo "keyAlias=mykey" >> android/app/key.properties
           echo "keyPassword=Fadel03906563" >> android/app/key.properties
 
-      - name: Build APK + AAB
+      - name: Build APK
         run: |
           chmod +x android/gradlew
-          cd android && ./gradlew clean assembleRelease bundleRelease
+          cd android && ./gradlew clean assembleRelease
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Bawsalti-BIG-Splash
-          path: |
-            android/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/bundle/release/*.aab
+          name: Bawsalti-FINAL-ALL-FIXED
+          path: android/app/build/outputs/apk/release/*.apk
