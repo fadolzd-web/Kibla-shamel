@@ -17,55 +17,85 @@ jobs:
       - run: npx cap add android || true
       - run: npx cap sync android
 
-      - name: FIX All - Icon + Sensor + Double Back + No Zoom
+      - name: FIX All
         run: |
           pip install Pillow
           rm -rf android/app/src/main/res/mipmap-anydpi-v26
           rm -f android/app/src/main/res/mipmap-*/ic_launcher.xml
           rm -f android/app/src/main/res/mipmap-*/ic_launcher_round.xml
-          
           python3 << 'PY'
           from PIL import Image
           import os, glob
-          icon = glob.glob("kibla.png") or glob.glob("khira.png") or ["kibla.png"]
-          icon = icon[0]
-          print(f"Icon {icon}")
+          icon = (glob.glob("kibla.png") or glob.glob("khira.png") or ["kibla.png"])[0]
           im = Image.open(icon).convert("RGBA")
           for folder,size in [("mipmap-mdpi",48),("mipmap-hdpi",72),("mipmap-xhdpi",96),("mipmap-xxhdpi",144),("mipmap-xxxhdpi",192)]:
-              p=f"android/app/src/main/res/{folder}"
-              os.makedirs(p,exist_ok=True)
+              p=f"android/app/src/main/res/{folder}"; os.makedirs(p,exist_ok=True)
               r=im.resize((size,size), Image.LANCZOS)
               r.save(f"{p}/ic_launcher.png","PNG",optimize=True)
               r.save(f"{p}/ic_launcher_round.png","PNG",optimize=True)
           PY
-          
           mkdir -p android/app/src/main/java/com/khira/qibla
           cat > android/app/src/main/java/com/khira/qibla/MainActivity.java << 'JAVA'
           package com.khira.qibla;
           import android.content.Context;
           import android.hardware.Sensor;
+          import android.hardware.SensorEvent;
           import android.hardware.SensorEventListener;
           import android.hardware.SensorManager;
           import android.os.Bundle;
           import android.widget.Toast;
           import com.getcapacitor.BridgeActivity;
           public class MainActivity extends BridgeActivity implements SensorEventListener {
-              private SensorManager sm;private Sensor s;private float[] rm=new float[9];private float[] o=new float[3];private long last=0;private long lastBack=0;
-              @Override public void onCreate(Bundle b){super.onCreate(b);sm=(SensorManager)getSystemService(Context.SENSOR_SERVICE);s=sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);}
-              @Override public void onResume(){super.onResume();if(s!=null) sm.registerListener(this,s,SensorManager.SENSOR_DELAY_GAME);}
-              @Override public void onPause(){super.onPause();sm.unregisterListener(this);}
+              private SensorManager sm;
+              private Sensor s;
+              private float[] rm=new float[9];
+              private float[] o=new float[3];
+              private long last=0;
+              private long lastBack=0;
+              @Override public void onCreate(Bundle b){
+                  super.onCreate(b);
+                  sm=(SensorManager)getSystemService(Context.SENSOR_SERVICE);
+                  s=sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
+              }
+              @Override public void onResume(){
+                  super.onResume();
+                  if(s!=null) sm.registerListener(this,s,SensorManager.SENSOR_DELAY_GAME);
+              }
+              @Override public void onPause(){
+                  super.onPause();
+                  sm.unregisterListener(this);
+              }
               @Override public void onBackPressed(){
                   long now=System.currentTimeMillis();
                   if(now-lastBack<2000){ super.onBackPressed(); return; }
                   lastBack=now;
                   Toast.makeText(this,"اضغط مرتين للخروج",Toast.LENGTH_SHORT).show();
-                  try{ if(bridge!=null&&bridge.getWebView()!=null){ bridge.getWebView().evaluateJavascript("javascript:try{var t=document.getElementById('exit-toast');if(t){t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2000)}}catch(e){}",null);} }catch(Exception e){}
+                  try{
+                      if(bridge!=null&&bridge.getWebView()!=null){
+                          bridge.getWebView().evaluateJavascript("javascript:try{var t=document.getElementById('exit-toast');if(t){t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2000)}}catch(e){}",null);
+                      }
+                  }catch(Exception e){}
               }
-              @Override public void onSensorChanged(SensorEvent e){if(e.sensor.getType()!=Sensor.TYPE_ROTATION_VECTOR) return;long now=System.currentTimeMillis();if(now-last<50) return;last=now;SensorManager.getRotationMatrixFromVector(rm,e.values);SensorManager.getOrientation(rm,o);float az=(float)Math.toDegrees(o[0]);az=(az+360)%360;final float a=az;runOnUiThread(()->{if(bridge!=null&&bridge.getWebView()!=null){String js="javascript:try{window.__smoothAz="+a+";if(window.onNativeAzimuth)window.onNativeAzimuth("+a+");window.postMessage({type:'native-azimuth',az:"+a+"},'*');}catch(e){}";bridge.getWebView().evaluateJavascript(js,null);}});}
+              @Override public void onSensorChanged(SensorEvent e){
+                  if(e.sensor.getType()!=Sensor.TYPE_ROTATION_VECTOR) return;
+                  long now=System.currentTimeMillis();
+                  if(now-last<50) return;
+                  last=now;
+                  SensorManager.getRotationMatrixFromVector(rm,e.values);
+                  SensorManager.getOrientation(rm,o);
+                  float az=(float)Math.toDegrees(o[0]);
+                  az=(az+360)%360;
+                  final float a=az;
+                  runOnUiThread(()->{
+                      if(bridge!=null&&bridge.getWebView()!=null){
+                          String js="javascript:try{window.__smoothAz="+a+";if(window.onNativeAzimuth)window.onNativeAzimuth("+a+");window.postMessage({type:'native-azimuth',az:"+a+"},'*');}catch(e){}";
+                          bridge.getWebView().evaluateJavascript(js,null);
+                      }
+                  });
+              }
               @Override public void onAccuracyChanged(Sensor sens,int acc){}
           }
           JAVA
-          
           python3 << 'PY'
           import pathlib
           p=pathlib.Path("android/app/src/main/AndroidManifest.xml")
