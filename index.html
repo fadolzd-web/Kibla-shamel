@@ -500,7 +500,7 @@ console.log('✅ Final Header + Single Toast + No Zoom loaded');
   }
   window.openCustomSheet = openSheet;
   
-  function closeSheet(){ sheet.style.display='none'; // removed cityInput.value=''; results.innerHTML=''; }
+  function closeSheet(){ sheet.style.display='none'; try{ cityInput.value=''; results.innerHTML=''; }catch(e){} }
 
   if(closeBtn) closeBtn.onclick=closeSheet;
   if(sheet) sheet.onclick=e=>{ if(e.target===sheet) closeSheet(); };
@@ -604,6 +604,13 @@ console.log('✅ Final Header + Single Toast + No Zoom loaded');
   console.log('✅ Fixed v2: custom sheet ready, call window.openCustomSheet() to test');
 })();
 </script>
+
+
+
+
+
+
+
 
 
 </body>
